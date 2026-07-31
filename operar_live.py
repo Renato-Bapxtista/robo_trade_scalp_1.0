@@ -38,7 +38,7 @@ def enviar_ordem_mercado(ativo, tipo_ordem, volume=1.0, sl_pips=0.0003, tp_pips=
         "magic": 2026,  # Identificador único das ordens do robô
         "comment": "Robo PPO Live",
         "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILL_IOC,
+        "type_filling": mt5.ORDER_FILLING_IOC,
     }
     
     resultado = mt5.order_send(requisicao)
