@@ -40,7 +40,9 @@ class AmbienteTrading(gymnasium.Env):
             self.passo_atual += 1
             finalizado = self.passo_atual >= len(self.df) - 1
             nova_observacao = self._pegar_observacao() if not finalizado else np.zeros((self.num_features,), dtype=np.float32)
-            return nova_observacao, 0.0, finalizado, False, {}
+            recompensa_bruta = 0.0
+            recompensa_bruta -= 0.0003  # Penalidade por não agir (em percentual do preço)
+            return nova_observacao, recompensa_bruta, finalizado, False, {}
             
         # --- CASO AÇÃO SEJA 0 (VENDA) OU 2 (COMPRA) ---
         preco_entrada = self.df.iloc[self.passo_atual]["close"]

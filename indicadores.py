@@ -1,5 +1,7 @@
+import os
 import numpy as np
 import pandas as pd
+import joblib
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 
 def prever_proximo_h1(df_h1: pd.DataFrame) -> pd.DataFrame:
@@ -40,35 +42,53 @@ def prever_proximo_h1(df_h1: pd.DataFrame) -> pd.DataFrame:
     df["feat_ia_prev_direcao"] = 0.0
     df["feat_ia_prev_tamanho"] = 0.0
     df["feat_ia_prev_dist_dia"] = 0.0
-    
-    # Modelos Leves de Machine Learning
-    clf_direcao = RandomForestClassifier(n_estimators=20, max_depth=5, random_state=42)
-    reg_tamanho = RandomForestRegressor(n_estimators=20, max_depth=5, random_state=42)
-    reg_dist_dia = RandomForestRegressor(n_estimators=20, max_depth=5, random_state=42)
 
-    # Simulando o tempo passando (Treina no passado, prevê o presente)
-    # Começamos a prever a partir do candle 100 para ter histórico mínimo de treino
-    for i in range(100, len(df)):
-        # Pega do início até o candle ANTERIOR ao atual
-        X_treino = df[colunas_features].iloc[:i]
-        
-        # Pega a linha ATUAL para prever o futuro dela
-        X_atual = df[colunas_features].iloc[[i]]
-        
-        # Treina e Prevê Direção
-        y_treino_dir = df["alvo_direcao"].iloc[:i]
-        clf_direcao.fit(X_treino, y_treino_dir)
-        df.loc[df.index[i], "feat_ia_prev_direcao"] = clf_direcao.predict(X_atual)[0]
-        
-        # Treina e Prevê Tamanho
-        y_treino_tam = df["alvo_tamanho"].iloc[:i]
-        reg_tamanho.fit(X_treino, y_treino_tam)
-        df.loc[df.index[i], "feat_ia_prev_tamanho"] = reg_tamanho.predict(X_atual)[0]
-        
-        # Treina e Prevê Distância do Dia
-        y_treino_dist = df["alvo_dist_dia"].iloc[:i]
-        reg_dist_dia.fit(X_treino, y_treino_dist)
-        df.loc[df.index[i], "feat_ia_prev_dist_dia"] = reg_dist_dia.predict(X_atual)[0]
+    df_treino = df.dropna(subset=["alvo_direcao", "alvo_tamanho", "alvo_dist_dia"])
+    models_path = os.path.join("models", "h1_models.joblib")
+
+    if len(df_treino) < 10:
+        # fallback simple heuristic when not enough H1 history
+        df["feat_ia_prev_direcao"] = (df["close"] > df["open"]).astype(float)
+        df["feat_ia_prev_tamanho"] = (df["close"] - df["open"]).abs()
+        media_diaria = df["close"].rolling(24, min_periods=1).mean()
+        df["feat_ia_prev_dist_dia"] = (df["close"] - media_diaria) / media_diaria.replace(0, 1)
+    else:
+        X_train = df_treino[colunas_features]
+
+        # If pre-trained models exist on disk, load and use them (faster for live)
+        if os.path.exists(models_path):
+            try:
+                clf_direcao, reg_tamanho, reg_dist_dia = joblib.load(models_path)
+                df.loc[df.index, "feat_ia_prev_direcao"] = clf_direcao.predict(df[colunas_features])
+                df.loc[df.index, "feat_ia_prev_tamanho"] = reg_tamanho.predict(df[colunas_features])
+                df.loc[df.index, "feat_ia_prev_dist_dia"] = reg_dist_dia.predict(df[colunas_features])
+            except Exception:
+                # if load fails, fallback to training once below
+                pass
+
+        # If we didn't fill predictions from disk, train once on available H1 and predict
+        if df["feat_ia_prev_direcao"].isnull().any() or (df["feat_ia_prev_direcao"] == 0).all():
+            y_dir = df_treino["alvo_direcao"]
+            clf_direcao = RandomForestClassifier(n_estimators=20, max_depth=5, random_state=42)
+            clf_direcao.fit(X_train, y_dir)
+            df.loc[df.index, "feat_ia_prev_direcao"] = clf_direcao.predict(df[colunas_features])
+
+            y_tam = df_treino["alvo_tamanho"]
+            reg_tamanho = RandomForestRegressor(n_estimators=20, max_depth=5, random_state=42)
+            reg_tamanho.fit(X_train, y_tam)
+            df.loc[df.index, "feat_ia_prev_tamanho"] = reg_tamanho.predict(df[colunas_features])
+
+            y_dist = df_treino["alvo_dist_dia"]
+            reg_dist_dia = RandomForestRegressor(n_estimators=20, max_depth=5, random_state=42)
+            reg_dist_dia.fit(X_train, y_dist)
+            df.loc[df.index, "feat_ia_prev_dist_dia"] = reg_dist_dia.predict(df[colunas_features])
+
+            # attempt to save the trained models for future use
+            try:
+                os.makedirs(os.path.dirname(models_path), exist_ok=True)
+                joblib.dump((clf_direcao, reg_tamanho, reg_dist_dia), models_path)
+            except Exception:
+                pass
 
     # Removemos as colunas de "gabarito/alvo" para o PPO não trapacear lendo o futuro exato
     df = df.drop(columns=["alvo_direcao", "alvo_tamanho", "alvo_dist_dia"])

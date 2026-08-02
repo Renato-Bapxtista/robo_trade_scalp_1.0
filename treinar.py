@@ -35,7 +35,7 @@ def executar_treinamento():
     
     print("\n--- PASSO 6: Iniciando Aprendizado por Reforço ---")
     # Mandamos o robô rodar 50.000 passos (candles) dentro do mercado para praticar
-    model.learn(total_timesteps=500000, progress_bar=True)
+    model.learn(total_timesteps=50000, progress_bar=True)
     print()
     # Salva o cérebro treinado em um arquivo
     model.save("robo_financeiro_ppo")

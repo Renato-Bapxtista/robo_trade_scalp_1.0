@@ -8,7 +8,26 @@ def _utc(data):
         return data.replace(tzinfo=timezone.utc)
     return data.astimezone(timezone.utc)
 
-def obter_dados_mt5(ativo="EURUSD", timeframe=mt5.TIMEFRAME_M5, inicio=datetime(2024, 1, 1, tzinfo=timezone.utc), fim=None) -> pd.DataFrame:
+def obter_dados_mt5(ativo="EURUSD", timeframe=mt5.TIMEFRAME_M5, inicio=datetime(2024, 1, 1, tzinfo=timezone.utc), fim=None, local_fallback: str | None = None) -> pd.DataFrame:
+    # If a local CSV fallback path is provided and exists, load it instead of querying MT5.
+    if local_fallback is not None and os.path.exists(local_fallback):
+        print(f"Loading M5 data from local CSV fallback: {local_fallback}")
+        df = pd.read_csv(local_fallback, parse_dates=["time"])  # expects a 'time' column
+        # ensure times are timezone-aware UTC
+        if hasattr(df["time"].dt, "tz") and df["time"].dt.tz is None:
+            df["time"] = df["time"].dt.tz_localize(timezone.utc)
+        elif hasattr(df["time"].dt, "tz"):
+            df["time"] = df["time"].dt.tz_convert(timezone.utc)
+
+        # Compute derived columns if missing so downstream code can rely on them
+        if "price_range" not in df.columns and {"high", "low"}.issubset(df.columns):
+            df["price_range"] = df["high"] - df["low"]
+        if "price_volume" not in df.columns:
+            df["price_volume"] = df.get("price_range", 0) * df.get("tick_volume", 0)
+        if "real_volume" not in df.columns:
+            df["real_volume"] = df.get("real_volume", 0)
+        return df
+
     if not mt5.initialize():
         raise RuntimeError(f"Não foi possível inicializar MT5: {mt5.last_error()}")
     
